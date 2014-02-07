@@ -1,1 +1,1 @@
-usr/lib/libFLAC.so.*
+usr/lib/*/libFLAC.so.*
