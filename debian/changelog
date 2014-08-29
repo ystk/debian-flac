@@ -1,4 +1,41 @@
-flac (1.2.1-6) unstable; urgency=medium
+flac (1.3.0-2) unstable; urgency=low
+
+  [ Reinhard Tartler ]
+  * switch to xz compression
+  * Bump standards version (no changes)
+
+  [ Fabian Greffrath ]
+  * Add -lflac to flac++'s pkg-config file (Closes: #713645);
+    thanks Sebastian Ramacher.
+
+ -- Fabian Greffrath <fabian+debian@greffrath.com>  Tue, 03 Sep 2013 21:38:39 +0200
+
+flac (1.3.0-1) unstable; urgency=low
+
+  * Imported Upstream version 1.3.0 (Closes: #527542, #705601).
+  * Update debian/watch file, thanks Ulrich Klauer (Closes: #710062).
+  * Revert "Remove manpages from master branch."
+  * Imported Upstream version 1.3.0
+  * Convert package to "3.0 (quilt)" source format.
+  * Remove all patches, they have either been merged upstream or do not
+    apply anymore (tested).
+  * Explicitly enable static libraries.
+  * Simplify debian/libflac-doc.install.
+  * Bump shlibs for added symbols.
+  * Remove needless Build-Depends: libid3-3.8.3-dev.
+  * Update Homepage field.
+  * Repair upstream manpage regeneration rule.
+  * Bump Build-Depends: debhelper (>= 9).
+  * Fix vcs-field-not-canonical.
+  * Import two patches from upstream GIT:
+    + Add missing config.h includes.
+    + Fix local_strcat() to terminate string correctly.
+  * Disable 3DNow! optimizations, enable SSE only on amd64, enable Altivec
+    only on ppc64, disable ASM optimizations elsewhere.
+
+ -- Fabian Greffrath <fabian+debian@greffrath.com>  Fri, 07 Jun 2013 10:24:30 +0200
+
+flac (1.2.1-6) UNRELEASED; urgency=medium
 
   * Fix "format not a string literal and no format arguments
     [-Werror=format-security]" errors (Closes: #643377).
