@@ -5,3 +5,4 @@ requires-flac.patch
 CVE-2014-8962.patch
 CVE-2014-9028.patch
 CVE-2014-9028-2.patch
+CVE-2020-0499.patch
