@@ -1,0 +1,190 @@
+From d9ae5e9128f13fb43d33adf732c313516c70f9c6 Mon Sep 17 00:00:00 2001
+From: Erik de Castro Lopo <erikd@mega-nerd.com>
+Date: Sat, 22 Aug 2015 19:22:50 +1000
+Subject: [PATCH] libFLAC: Add function safe_realloc_()
+
+The new function wraps, realloc() and if the realloc() fails, it
+free()s the old pointer.
+
+This is an improvement on the potential realloc() memory leak that
+was fixed in 15a9062609.
+
+Still needs fuzzing to validate it.
+---
+ include/share/alloc.h                         | 14 ++++++-
+ src/libFLAC/format.c                          | 12 ++----
+ src/libFLAC/md5.c                             |  3 +-
+ src/libFLAC/metadata_object.c                 | 37 +++++--------------
+ .../replaygain_analysis/replaygain_analysis.c | 10 ++---
+ 5 files changed, 28 insertions(+), 48 deletions(-)
+
+--- a/include/share/alloc.h
++++ b/include/share/alloc.h
+@@ -153,11 +153,21 @@ static inline void *safe_malloc_muladd2_
+ 	return malloc(size1*size2);
+ }
+ 
++static inline void *safe_realloc_(void *ptr, size_t size)
++{
++	void *oldptr = ptr;
++	void *newptr = realloc(ptr, size);
++	if(size > 0 && newptr == 0)
++		free(oldptr);
++	return newptr;
++}
+ static inline void *safe_realloc_add_2op_(void *ptr, size_t size1, size_t size2)
+ {
+ 	size2 += size1;
+-	if(size2 < size1)
++	if(size2 < size1) {
++		free(ptr);
+ 		return 0;
++	}
+ 	return realloc(ptr, size2);
+ }
+ 
+@@ -192,7 +202,7 @@ static inline void *safe_realloc_mul_2op
+ 		return realloc(ptr, 0); /* preserve POSIX realloc(ptr, 0) semantics */
+ 	if(size1 > SIZE_MAX / size2)
+ 		return 0;
+-	return realloc(ptr, size1*size2);
++	return safe_realloc_(ptr, size1*size2);
+ }
+ 
+ /* size1 * (size2 + size3) */
+--- a/src/libFLAC/format.c
++++ b/src/libFLAC/format.c
+@@ -39,6 +39,7 @@
+ #include <string.h> /* for memset() */
+ #include "FLAC/assert.h"
+ #include "FLAC/format.h"
++#include "share/alloc.h"
+ #include "share/compat.h"
+ #include "private/format.h"
+ #include "private/macros.h"
+@@ -578,17 +579,10 @@ FLAC__bool FLAC__format_entropy_coding_m
+ 	FLAC__ASSERT(object->capacity_by_order > 0 || (0 == object->parameters && 0 == object->raw_bits));
+ 
+ 	if(object->capacity_by_order < max_partition_order) {
+-		void *oldptr;
+-		oldptr = object->parameters;
+-		if(0 == (object->parameters = realloc(object->parameters, sizeof(unsigned)*(1 << max_partition_order)))) {
+-			free(oldptr);
++		if(0 == (object->parameters = safe_realloc_(object->parameters, sizeof(unsigned)*(1 << max_partition_order))))
+ 			return false;
+-		}
+-		oldptr = object->raw_bits;
+-		if(0 == (object->raw_bits = realloc(object->raw_bits, sizeof(unsigned)*(1 << max_partition_order)))) {
+-			free(oldptr);
++		if(0 == (object->raw_bits = safe_realloc_(object->raw_bits, sizeof(unsigned)*(1 << max_partition_order))))
+ 			return false;
+-		}
+ 		memset(object->raw_bits, 0, sizeof(unsigned)*(1 << max_partition_order));
+ 		object->capacity_by_order = max_partition_order;
+ 	}
+--- a/src/libFLAC/md5.c
++++ b/src/libFLAC/md5.c
+@@ -402,9 +402,8 @@ FLAC__bool FLAC__MD5Accumulate(FLAC__MD5
+ 		return false;
+ 
+ 	if(ctx->capacity < bytes_needed) {
+-		FLAC__byte *tmp = realloc(ctx->internal_buf, bytes_needed);
++		FLAC__byte *tmp = safe_realloc_(ctx->internal_buf, bytes_needed);
+ 		if(0 == tmp) {
+-			free(ctx->internal_buf);
+ 			if(0 == (ctx->internal_buf = safe_malloc_(bytes_needed)))
+ 				return false;
+ 		}
+--- a/src/libFLAC/metadata_object.c
++++ b/src/libFLAC/metadata_object.c
+@@ -959,13 +959,8 @@ FLAC_API FLAC__bool FLAC__metadata_objec
+ 			free(object->data.seek_table.points);
+ 			object->data.seek_table.points = 0;
+ 		}
+-		else {
+-			void *oldptr = object->data.seek_table.points;
+-			if(0 == (object->data.seek_table.points = realloc(object->data.seek_table.points, new_size))) {
+-				free(oldptr);
+-				return false;
+-			}
+-		}
++		else if(0 == (object->data.seek_table.points = safe_realloc_(object->data.seek_table.points, new_size)))
++			return false;
+ 
+ 		/* if growing, set new elements to placeholders */
+ 		if(new_size > old_size) {
+@@ -1203,13 +1198,9 @@ FLAC_API FLAC__bool FLAC__metadata_objec
+ 			free(object->data.vorbis_comment.comments);
+ 			object->data.vorbis_comment.comments = 0;
+ 		}
+-		else {
+-			FLAC__StreamMetadata_VorbisComment_Entry *oldptr = object->data.vorbis_comment.comments;
+-			if(0 == (object->data.vorbis_comment.comments = realloc(object->data.vorbis_comment.comments, new_size))) {
+-				vorbiscomment_entry_array_delete_(oldptr, object->data.vorbis_comment.num_comments);
+-				object->data.vorbis_comment.num_comments = 0;
+-				return false;
+-			}
++		else if(0 == (object->data.vorbis_comment.comments = safe_realloc_(object->data.vorbis_comment.comments, new_size))) {
++			object->data.vorbis_comment.num_comments = 0;
++			return false;
+ 		}
+ 
+ 		/* if growing, zero all the length/pointers of new elements */
+@@ -1512,13 +1503,8 @@ FLAC_API FLAC__bool FLAC__metadata_objec
+ 			free(track->indices);
+ 			track->indices = 0;
+ 		}
+-		else {
+-			void *oldptr = track->indices;
+-			if(0 == (track->indices = realloc(track->indices, new_size))) {
+-				free(oldptr);
+-				return false;
+-			}
+-		}
++		else if(0 == (track->indices = safe_realloc_(track->indices, new_size)))
++			return false;
+ 
+ 		/* if growing, zero all the lengths/pointers of new elements */
+ 		if(new_size > old_size)
+@@ -1613,13 +1599,8 @@ FLAC_API FLAC__bool FLAC__metadata_objec
+ 			free(object->data.cue_sheet.tracks);
+ 			object->data.cue_sheet.tracks = 0;
+ 		}
+-		else {
+-			void *oldptr = object->data.cue_sheet.tracks;
+-			if(0 == (object->data.cue_sheet.tracks = realloc(object->data.cue_sheet.tracks, new_size))) {
+-				free(oldptr);
+-				return false;
+-			}
+-		}
++		else if(0 == (object->data.cue_sheet.tracks = safe_realloc_(object->data.cue_sheet.tracks, new_size)))
++			return false;
+ 
+ 		/* if growing, zero all the lengths/pointers of new elements */
+ 		if(new_size > old_size)
+--- a/src/share/replaygain_analysis/replaygain_analysis.c
++++ b/src/share/replaygain_analysis/replaygain_analysis.c
+@@ -97,6 +97,7 @@
+ #include <stdlib.h>
+ #include <string.h>
+ #include <math.h>
++#include "share/alloc.h"
+ 
+ #include "replaygain_analysis.h"
+ 
+@@ -344,13 +345,8 @@ CreateGainFilter ( long samplefreq )
+ static void*
+ ReallocateWindowBuffer(unsigned window_size, Float_t **window_buffer)
+ {
+-    void *p = realloc(
+-        *window_buffer, sizeof(**window_buffer) * (window_size + MAX_ORDER));
+-
+-    if (p)
+-        *window_buffer = p;
+-
+-    return p;
++    *window_buffer = safe_realloc_(*window_buffer, sizeof(**window_buffer) * (window_size + MAX_ORDER));
++    return *window_buffer;
+ }
+ 
+ static int

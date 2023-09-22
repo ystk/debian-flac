@@ -1,0 +1,149 @@
+From 15a9062609c123b56df104a575dba657c2577e0b Mon Sep 17 00:00:00 2001
+From: Erik de Castro Lopo <erikd@mega-nerd.com>
+Date: Sun, 9 Aug 2015 14:31:57 +1000
+Subject: [PATCH] libFLAC: Fix potential meory leaks
+
+If the `realloc` function failed, memory would leak.
+
+Patch-from: lvqcl <lvqcl.mail@gmail.com>
+---
+ src/libFLAC/format.c          | 11 +++++++++--
+ src/libFLAC/metadata_object.c | 37 ++++++++++++++++++++++++++---------
+ src/libFLAC/stream_decoder.c  |  7 +++++++
+ 3 files changed, 44 insertions(+), 11 deletions(-)
+
+diff --git a/src/libFLAC/format.c b/src/libFLAC/format.c
+index 4d0d8329b5..5215c56a44 100644
+--- a/src/libFLAC/format.c
++++ b/src/libFLAC/format.c
+@@ -573,10 +573,17 @@ FLAC__bool FLAC__format_entropy_coding_method_partitioned_rice_contents_ensure_s
+ 	FLAC__ASSERT(object->capacity_by_order > 0 || (0 == object->parameters && 0 == object->raw_bits));
+ 
+ 	if(object->capacity_by_order < max_partition_order) {
+-		if(0 == (object->parameters = realloc(object->parameters, sizeof(unsigned)*(1 << max_partition_order))))
++		void *oldptr;
++		oldptr = object->parameters;
++		if(0 == (object->parameters = realloc(object->parameters, sizeof(unsigned)*(1 << max_partition_order)))) {
++			free(oldptr);
+ 			return false;
+-		if(0 == (object->raw_bits = realloc(object->raw_bits, sizeof(unsigned)*(1 << max_partition_order))))
++		}
++		oldptr = object->raw_bits;
++		if(0 == (object->raw_bits = realloc(object->raw_bits, sizeof(unsigned)*(1 << max_partition_order)))) {
++			free(oldptr);
+ 			return false;
++		}
+ 		memset(object->raw_bits, 0, sizeof(unsigned)*(1 << max_partition_order));
+ 		object->capacity_by_order = max_partition_order;
+ 	}
+diff --git a/src/libFLAC/metadata_object.c b/src/libFLAC/metadata_object.c
+index 909dab58e5..1bfa0b4854 100644
+--- a/src/libFLAC/metadata_object.c
++++ b/src/libFLAC/metadata_object.c
+@@ -954,8 +954,13 @@ FLAC_API FLAC__bool FLAC__metadata_object_seektable_resize_points(FLAC__StreamMe
+ 			free(object->data.seek_table.points);
+ 			object->data.seek_table.points = 0;
+ 		}
+-		else if(0 == (object->data.seek_table.points = realloc(object->data.seek_table.points, new_size)))
+-			return false;
++		else {
++			void *oldptr = object->data.seek_table.points;
++			if(0 == (object->data.seek_table.points = realloc(object->data.seek_table.points, new_size))) {
++				free(oldptr);
++				return false;
++			}
++		}
+ 
+ 		/* if growing, set new elements to placeholders */
+ 		if(new_size > old_size) {
+@@ -1200,9 +1205,13 @@ FLAC_API FLAC__bool FLAC__metadata_object_vorbiscomment_resize_comments(FLAC__St
+ 			free(object->data.vorbis_comment.comments);
+ 			object->data.vorbis_comment.comments = 0;
+ 		}
+-		else if(0 == (object->data.vorbis_comment.comments = realloc(object->data.vorbis_comment.comments, new_size))) {
+-			object->data.vorbis_comment.num_comments = 0;
+-			return false;
++		else {
++			FLAC__StreamMetadata_VorbisComment_Entry *oldptr = object->data.vorbis_comment.comments;
++			if(0 == (object->data.vorbis_comment.comments = realloc(object->data.vorbis_comment.comments, new_size))) {
++				vorbiscomment_entry_array_delete_(oldptr, object->data.vorbis_comment.num_comments);
++				object->data.vorbis_comment.num_comments = 0;
++				return false;
++			}
+ 		}
+ 
+ 		/* if growing, zero all the length/pointers of new elements */
+@@ -1504,8 +1513,13 @@ FLAC_API FLAC__bool FLAC__metadata_object_cuesheet_track_resize_indices(FLAC__St
+ 			free(track->indices);
+ 			track->indices = 0;
+ 		}
+-		else if(0 == (track->indices = realloc(track->indices, new_size)))
+-			return false;
++		else {
++			void *oldptr = track->indices;
++			if(0 == (track->indices = realloc(track->indices, new_size))) {
++				free(oldptr);
++				return false;
++			}
++		}
+ 
+ 		/* if growing, zero all the lengths/pointers of new elements */
+ 		if(new_size > old_size)
+@@ -1599,8 +1613,13 @@ FLAC_API FLAC__bool FLAC__metadata_object_cuesheet_resize_tracks(FLAC__StreamMet
+ 			free(object->data.cue_sheet.tracks);
+ 			object->data.cue_sheet.tracks = 0;
+ 		}
+-		else if(0 == (object->data.cue_sheet.tracks = realloc(object->data.cue_sheet.tracks, new_size)))
+-			return false;
++		else {
++			void *oldptr = object->data.cue_sheet.tracks;
++			if(0 == (object->data.cue_sheet.tracks = realloc(object->data.cue_sheet.tracks, new_size))) {
++				free(oldptr);
++				return false;
++			}
++		}
+ 
+ 		/* if growing, zero all the lengths/pointers of new elements */
+ 		if(new_size > old_size)
+diff --git a/src/libFLAC/stream_decoder.c b/src/libFLAC/stream_decoder.c
+index 519b0c3222..4a4be2ea24 100644
+--- a/src/libFLAC/stream_decoder.c
++++ b/src/libFLAC/stream_decoder.c
+@@ -763,7 +763,9 @@ FLAC_API FLAC__bool FLAC__stream_decoder_set_metadata_respond_application(FLAC__
+ 	FLAC__ASSERT(0 != decoder->private_->metadata_filter_ids);
+ 
+ 	if(decoder->private_->metadata_filter_ids_count == decoder->private_->metadata_filter_ids_capacity) {
++		void *oldptr = decoder->private_->metadata_filter_ids;
+ 		if(0 == (decoder->private_->metadata_filter_ids = safe_realloc_mul_2op_(decoder->private_->metadata_filter_ids, decoder->private_->metadata_filter_ids_capacity, /*times*/2))) {
++			free(oldptr);
+ 			decoder->protected_->state = FLAC__STREAM_DECODER_MEMORY_ALLOCATION_ERROR;
+ 			return false;
+ 		}
+@@ -822,7 +824,9 @@ FLAC_API FLAC__bool FLAC__stream_decoder_set_metadata_ignore_application(FLAC__S
+ 	FLAC__ASSERT(0 != decoder->private_->metadata_filter_ids);
+ 
+ 	if(decoder->private_->metadata_filter_ids_count == decoder->private_->metadata_filter_ids_capacity) {
++		void *oldptr = decoder->private_->metadata_filter_ids;
+ 		if(0 == (decoder->private_->metadata_filter_ids = safe_realloc_mul_2op_(decoder->private_->metadata_filter_ids, decoder->private_->metadata_filter_ids_capacity, /*times*/2))) {
++			free(oldptr);
+ 			decoder->protected_->state = FLAC__STREAM_DECODER_MEMORY_ALLOCATION_ERROR;
+ 			return false;
+ 		}
+@@ -1656,6 +1660,7 @@ FLAC__bool read_metadata_seektable_(FLAC__StreamDecoder *decoder, FLAC__bool is_
+ {
+ 	FLAC__uint32 i, x;
+ 	FLAC__uint64 xx;
++	void *oldptr;
+ 
+ 	FLAC__ASSERT(FLAC__bitreader_is_consumed_byte_aligned(decoder->private_->input));
+ 
+@@ -1666,7 +1671,9 @@ FLAC__bool read_metadata_seektable_(FLAC__StreamDecoder *decoder, FLAC__bool is_
+ 	decoder->private_->seek_table.data.seek_table.num_points = length / FLAC__STREAM_METADATA_SEEKPOINT_LENGTH;
+ 
+ 	/* use realloc since we may pass through here several times (e.g. after seeking) */
++	oldptr = decoder->private_->seek_table.data.seek_table.points;
+ 	if(0 == (decoder->private_->seek_table.data.seek_table.points = safe_realloc_mul_2op_(decoder->private_->seek_table.data.seek_table.points, decoder->private_->seek_table.data.seek_table.num_points, /*times*/sizeof(FLAC__StreamMetadata_SeekPoint)))) {
++		free(oldptr);
+ 		decoder->protected_->state = FLAC__STREAM_DECODER_MEMORY_ALLOCATION_ERROR;
+ 		return false;
+ 	}

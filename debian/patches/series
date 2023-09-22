@@ -7,3 +7,7 @@ CVE-2014-9028.patch
 CVE-2014-9028-2.patch
 CVE-2020-0499.patch
 CVE-2021-0561.patch
+libFLAC-more-comment-validation.patch
+libFLAC-fix-potential-memory-leaks.patch
+Add-function-safe_realloc_.patch
+CVE-2020-22219.patch

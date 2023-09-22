@@ -26,7 +26,10 @@ override_dh_auto_configure:
 		--enable-static
 
 override_dh_auto_test:
-	dh_auto_test --no-act
+	# drop (fake)root privileges,
+	# but still skip running test suite
+	# as it is *exhaustive*
+	env -u LD_PRELOAD dh_auto_test --no-act
 
 override_dh_makeshlibs:
 	dh_makeshlibs -plibflac8 -V "libflac8 (>= 1.3.0)"

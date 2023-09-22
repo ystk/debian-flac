@@ -1,0 +1,61 @@
+From ff50779e4498b87cc2023cabb46e970b9f8787e6 Mon Sep 17 00:00:00 2001
+From: Erik de Castro Lopo <erikd@mega-nerd.com>
+Date: Sun, 5 Jul 2015 21:21:44 +1000
+Subject: [PATCH] libFLAC: More comment validation
+
+When the allocation for obj->comment fails, set obj->num_comments
+to zero.
+
+Patch-from: lvqcl <lvqcl.mail@gmail.com>
+---
+ src/libFLAC/metadata_iterators.c | 4 +++-
+ src/libFLAC/metadata_object.c    | 5 ++++-
+ src/libFLAC/stream_decoder.c     | 1 +
+ 3 files changed, 8 insertions(+), 2 deletions(-)
+
+--- a/src/libFLAC/metadata_iterators.c
++++ b/src/libFLAC/metadata_iterators.c
+@@ -2238,8 +2238,10 @@ FLAC__Metadata_SimpleIteratorStatus read
+ 	if(block->num_comments == 0) {
+ 		block->comments = 0;
+ 	}
+-	else if(0 == (block->comments = calloc(block->num_comments, sizeof(FLAC__StreamMetadata_VorbisComment_Entry))))
++	else if(0 == (block->comments = calloc(block->num_comments, sizeof(FLAC__StreamMetadata_VorbisComment_Entry)))) {
++		block->num_comments = 0;
+ 		return FLAC__METADATA_SIMPLE_ITERATOR_STATUS_MEMORY_ALLOCATION_ERROR;
++	}
+ 
+ 	for(i = 0; i < block->num_comments; i++) {
+ 		if(FLAC__METADATA_SIMPLE_ITERATOR_STATUS_OK != (status = read_metadata_block_data_vorbis_comment_entry_cb_(handle, read_cb, block->comments + i)))
+--- a/src/libFLAC/metadata_object.c
++++ b/src/libFLAC/metadata_object.c
+@@ -582,6 +582,7 @@ FLAC_API FLAC__StreamMetadata *FLAC__met
+ 					FLAC__ASSERT(0 != object->data.vorbis_comment.comments);
+ 					to->data.vorbis_comment.comments = vorbiscomment_entry_array_copy_(object->data.vorbis_comment.comments, object->data.vorbis_comment.num_comments);
+ 					if(0 == to->data.vorbis_comment.comments) {
++						to->data.vorbis_comment.num_comments = 0;
+ 						FLAC__metadata_object_delete(to);
+ 						return 0;
+ 					}
+@@ -1197,8 +1198,10 @@ FLAC_API FLAC__bool FLAC__metadata_objec
+ 			free(object->data.vorbis_comment.comments);
+ 			object->data.vorbis_comment.comments = 0;
+ 		}
+-		else if(0 == (object->data.vorbis_comment.comments = realloc(object->data.vorbis_comment.comments, new_size)))
++		else if(0 == (object->data.vorbis_comment.comments = realloc(object->data.vorbis_comment.comments, new_size))) {
++			object->data.vorbis_comment.num_comments = 0;
+ 			return false;
++		}
+ 
+ 		/* if growing, zero all the length/pointers of new elements */
+ 		if(new_size > old_size)
+--- a/src/libFLAC/stream_decoder.c
++++ b/src/libFLAC/stream_decoder.c
+@@ -1720,6 +1720,7 @@ FLAC__bool read_metadata_vorbiscomment_(
+ 	/* read comments */
+ 	if(obj->num_comments > 0) {
+ 		if(0 == (obj->comments = safe_malloc_mul_2op_p(obj->num_comments, /*times*/sizeof(FLAC__StreamMetadata_VorbisComment_Entry)))) {
++			obj->num_comments = 0;
+ 			decoder->protected_->state = FLAC__STREAM_DECODER_MEMORY_ALLOCATION_ERROR;
+ 			return false;
+ 		}
